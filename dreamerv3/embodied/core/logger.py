@@ -232,7 +232,6 @@ class WandBOutput:
     self._pattern = re.compile(pattern)
     import wandb
     wandb.init(
-        project="dreamerv3",
         name=config.wdb_name,
         config=dict(config),
     )
