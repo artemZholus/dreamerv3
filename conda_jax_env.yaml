@@ -1,0 +1,29 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip:
+    - tensorflow_probability
+    - optax
+    - tensorflow-cpu
+    - ruamel.yaml
+    - moviepy
+    - imageio
+    - crafter
+    - dm-control==1.0.12
+    - robodesk
+    - bsuite
+    - opt_einsum
+    - einops
+    - wandb
+    - pykeops
+    - memory-maze==1.0.2
+    - procgen
+    - jax[cuda11_pip] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    - atari-py==0.2.9 
+    - opencv-python
+    - gym==0.19.0
+    - backoff
+    - mlflow
+    - google.cloud.storage
