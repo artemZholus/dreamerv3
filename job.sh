@@ -7,7 +7,7 @@ mkdir -p $(pwd)/wandb
 echo "copying code into: $CODE_PATH"
 export RUNNABLE="$@"
 echo "Running: $RUNNABLE"
-cp -r .netrc $CODE_PATH/
+cp -r dreamerv3 .netrc $CODE_PATH/
 singularity exec --nv \
     -H $CODE_PATH:/home \
     -B $(pwd)/wandb:/home/wandb \
