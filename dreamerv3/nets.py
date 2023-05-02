@@ -18,13 +18,14 @@ class RSSM(nj.Module):
 
   def __init__(
       self, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
-      unimix=0.01, action_clip=1.0, **kw):
+      unimix=0.01, action_clip=1.0, new_form=False, **kw):
     self._deter = deter
     self._stoch = stoch
     self._classes = classes
     self._unroll = unroll
     self._initial = initial
     self._unimix = unimix
+    self._new_form = new_form
     self._action_clip = action_clip
     self._kw = kw
 
@@ -92,7 +93,10 @@ class RSSM(nj.Module):
         lambda x, y: x + self._mask(y, is_first),
         prev_state, self.initial(len(is_first)))
     prior = self.img_step(prev_state, prev_action)
-    x = jnp.concatenate([prior['deter'], embed], -1)
+    if self._new_form:
+      x = embed
+    else:
+      x = jnp.concatenate([prior['deter'], embed], -1)
     x = self.get('obs_out', Linear, **self._kw)(x)
     stats = self._stats('obs_stats', x)
     dist = self.get_dist(stats)
