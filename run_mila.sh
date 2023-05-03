@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --partition=main
+#SBATCH --partition=long
 #SBATCH --time=1-00:00
-#SBATCH -c 8
-#SBATCH --mem 48G 
+#SBATCH -c 24
+#SBATCH --mem 128G 
 #SBATCH --gres=gpu:rtx8000:1
 module load singularity/3.7.1
 # on mila
@@ -11,4 +11,7 @@ module load singularity/3.7.1
 # module load singularity 
 # cd $SCRATCH
 # singularity pull docker://artemzholus/jax_cuda11.8
+export WANDB_MODE=online
+export WANDB_ENTITY=chandar-rl
+export WANDB_PROJECT=s4dreamer
 ./job.sh "$@"

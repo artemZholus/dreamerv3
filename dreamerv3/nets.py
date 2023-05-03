@@ -14,42 +14,11 @@ from . import ninjax as nj
 cast = jaxutils.cast_to_compute
 
 
-class RSSM(nj.Module):
-
-  def __init__(
-      self, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
-      unimix=0.01, action_clip=1.0, new_form=False, **kw):
-    self._deter = deter
-    self._stoch = stoch
-    self._classes = classes
-    self._unroll = unroll
-    self._initial = initial
-    self._unimix = unimix
-    self._new_form = new_form
-    self._action_clip = action_clip
-    self._kw = kw
-
+class SSM(nj.Module):
+  """ A base class with SSM api """
+  
   def initial(self, bs):
-    if self._classes:
-      state = dict(
-          deter=jnp.zeros([bs, self._deter], f32),
-          logit=jnp.zeros([bs, self._stoch, self._classes], f32),
-          stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
-    else:
-      state = dict(
-          deter=jnp.zeros([bs, self._deter], f32),
-          mean=jnp.zeros([bs, self._stoch], f32),
-          std=jnp.ones([bs, self._stoch], f32),
-          stoch=jnp.zeros([bs, self._stoch], f32))
-    if self._initial == 'zeros':
-      return cast(state)
-    elif self._initial == 'learned':
-      deter = self.get('initial', jnp.zeros, state['deter'][0].shape, f32)
-      state['deter'] = jnp.repeat(jnp.tanh(deter)[None], bs, 0)
-      state['stoch'] = self.get_stoch(cast(state['deter']))
-      return cast(state)
-    else:
-      raise NotImplementedError(self._initial)
+    return NotImplemented
 
   def observe(self, embed, action, is_first, state=None):
     swap = lambda x: x.transpose([1, 0] + list(range(2, len(x.shape))))
@@ -73,13 +42,10 @@ class RSSM(nj.Module):
     return prior
 
   def get_dist(self, state, argmax=False):
-    if self._classes:
-      logit = state['logit'].astype(f32)
-      return tfd.Independent(jaxutils.OneHotDist(logit), 1)
-    else:
-      mean = state['mean'].astype(f32)
-      std = state['std'].astype(f32)
-      return tfd.MultivariateNormalDiag(mean, std)
+    return NotImplemented
+
+  def _cell(self, x, deter):
+    return NotImplemented
 
   def obs_step(self, prev_state, prev_action, embed, is_first):
     is_first = cast(is_first)
@@ -118,7 +84,7 @@ class RSSM(nj.Module):
       prev_action = prev_action.reshape(shape)
     x = jnp.concatenate([prev_stoch, prev_action], -1)
     x = self.get('img_in', Linear, **self._kw)(x)
-    x, deter = self._gru(x, prev_state['deter'])
+    x, deter = self._cell(x, prev_state['deter'])
     x = self.get('img_out', Linear, **self._kw)(x)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
@@ -127,12 +93,88 @@ class RSSM(nj.Module):
     return cast(prior)
 
   def get_stoch(self, deter):
+    return NotImplemented
+
+  def dyn_loss(self, post, prior, impl='kl', free=1.0):
+    if impl == 'kl':
+      loss = self.get_dist(sg(post)).kl_divergence(self.get_dist(prior))
+    elif impl == 'logprob':
+      loss = -self.get_dist(prior).log_prob(sg(post['stoch']))
+    else:
+      raise NotImplementedError(impl)
+    if free:
+      loss = jnp.maximum(loss, free)
+    return loss
+
+  def rep_loss(self, post, prior, impl='kl', free=1.0):
+    if impl == 'kl':
+      loss = self.get_dist(post).kl_divergence(self.get_dist(sg(prior)))
+    elif impl == 'uniform':
+      uniform = jax.tree_util.tree_map(lambda x: jnp.zeros_like(x), prior)
+      loss = self.get_dist(post).kl_divergence(self.get_dist(uniform))
+    elif impl == 'entropy':
+      loss = -self.get_dist(post).entropy()
+    elif impl == 'none':
+      loss = jnp.zeros(post['deter'].shape[:-1])
+    else:
+      raise NotImplementedError(impl)
+    if free:
+      loss = jnp.maximum(loss, free)
+    return loss
+
+class RSSM(SSM):
+
+  def __init__(
+      self, deter=1024, stoch=32, classes=32, unroll=False, initial='learned',
+      unimix=0.01, action_clip=1.0, new_form=False, **kw):
+    self._deter = deter
+    self._stoch = stoch
+    self._classes = classes
+    self._unroll = unroll
+    self._initial = initial
+    self._unimix = unimix
+    self._new_form = new_form
+    self._action_clip = action_clip
+    self._kw = kw
+
+  def initial(self, bs):
+    if self._classes:
+      state = dict(
+          deter=jnp.zeros([bs, self._deter], f32),
+          logit=jnp.zeros([bs, self._stoch, self._classes], f32),
+          stoch=jnp.zeros([bs, self._stoch, self._classes], f32))
+    else:
+      state = dict(
+          deter=jnp.zeros([bs, self._deter], f32),
+          mean=jnp.zeros([bs, self._stoch], f32),
+          std=jnp.ones([bs, self._stoch], f32),
+          stoch=jnp.zeros([bs, self._stoch], f32))
+    if self._initial == 'zeros':
+      return cast(state)
+    elif self._initial == 'learned':
+      deter = self.get('initial', jnp.zeros, state['deter'][0].shape, f32)
+      state['deter'] = jnp.repeat(jnp.tanh(deter)[None], bs, 0)
+      state['stoch'] = self.get_stoch(cast(state['deter']))
+      return cast(state)
+    else:
+      raise NotImplementedError(self._initial)
+
+  def get_dist(self, state, argmax=False):
+    if self._classes:
+      logit = state['logit'].astype(f32)
+      return tfd.Independent(jaxutils.OneHotDist(logit), 1)
+    else:
+      mean = state['mean'].astype(f32)
+      std = state['std'].astype(f32)
+      return tfd.MultivariateNormalDiag(mean, std)
+
+  def get_stoch(self, deter):
     x = self.get('img_out', Linear, **self._kw)(deter)
     stats = self._stats('img_stats', x)
     dist = self.get_dist(stats)
     return cast(dist.mode())
 
-  def _gru(self, x, deter):
+  def _cell(self, x, deter):
     x = jnp.concatenate([deter, x], -1)
     kw = {**self._kw, 'act': 'none', 'units': 3 * self._deter}
     x = self.get('gru', Linear, **kw)(x)
@@ -162,33 +204,6 @@ class RSSM(nj.Module):
 
   def _mask(self, value, mask):
     return jnp.einsum('b...,b->b...', value, mask.astype(value.dtype))
-
-  def dyn_loss(self, post, prior, impl='kl', free=1.0):
-    if impl == 'kl':
-      loss = self.get_dist(sg(post)).kl_divergence(self.get_dist(prior))
-    elif impl == 'logprob':
-      loss = -self.get_dist(prior).log_prob(sg(post['stoch']))
-    else:
-      raise NotImplementedError(impl)
-    if free:
-      loss = jnp.maximum(loss, free)
-    return loss
-
-  def rep_loss(self, post, prior, impl='kl', free=1.0):
-    if impl == 'kl':
-      loss = self.get_dist(post).kl_divergence(self.get_dist(sg(prior)))
-    elif impl == 'uniform':
-      uniform = jax.tree_util.tree_map(lambda x: jnp.zeros_like(x), prior)
-      loss = self.get_dist(post).kl_divergence(self.get_dist(uniform))
-    elif impl == 'entropy':
-      loss = -self.get_dist(post).entropy()
-    elif impl == 'none':
-      loss = jnp.zeros(post['deter'].shape[:-1])
-    else:
-      raise NotImplementedError(impl)
-    if free:
-      loss = jnp.maximum(loss, free)
-    return loss
 
 
 class MultiEncoder(nj.Module):
